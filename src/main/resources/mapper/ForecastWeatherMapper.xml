@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" 
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.dublin.repository.ForecastWeatherRepository">
+
+    <resultMap id="ForecastWeatherResultMap" type="com.dublin.entity.ForecastWeather">
+        <id property="id" column="id"/>
+        <result property="futureDt" column="future_dt"/>
+        <result property="main" column="main"/>
+        <result property="description" column="description"/>
+        <result property="temp12" column="temp_12"/>
+        <result property="tempMin" column="temp_min"/>
+        <result property="tempMax" column="temp_max"/>
+        <result property="windSpeedMax" column="wind_speed_max"/>
+        <result property="snapshotTime" column="snapshot_time"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.dublin.entity.ForecastWeather" 
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO forecast_weather (future_dt, main, description, temp_12, temp_min, temp_max, wind_speed_max, snapshot_time)
+        VALUES (#{futureDt}, #{main}, #{description}, #{temp12}, #{tempMin}, #{tempMax}, #{windSpeedMax}, #{snapshotTime})
+    </insert>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO forecast_weather (future_dt, main, description, temp_12, temp_min, temp_max, wind_speed_max, snapshot_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.futureDt}, #{item.main}, #{item.description}, #{item.temp12}, 
+             #{item.tempMin}, #{item.tempMax}, #{item.windSpeedMax}, #{item.snapshotTime})
+        </foreach>
+    </insert>
+
+    <select id="findLatestForecast" resultMap="ForecastWeatherResultMap">
+        SELECT id, future_dt, main, description, temp_12, temp_min, temp_max, wind_speed_max, snapshot_time
+        FROM forecast_weather
+        WHERE snapshot_time = (
+            SELECT MAX(snapshot_time) FROM forecast_weather
+        )
+        ORDER BY future_dt
+    </select>
+
+    <delete id="deleteBySnapshotTimeBefore" parameterType="java.time.LocalDateTime">
+        DELETE FROM forecast_weather
+        WHERE snapshot_time &lt; #{dateTime}
+    </delete>
+
+</mapper>

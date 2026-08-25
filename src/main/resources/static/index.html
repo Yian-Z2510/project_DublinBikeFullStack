@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WheelyWise</title>
+  <link rel="stylesheet" href="/css/home.css" />
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
+</head>  
+  
+<body>
+  
+    <!-- Header: Logo and Weather displays -->
+  <header class="top-bar">
+
+    <div class="weather-left">
+      <div class="logo-header">
+        🚲 <span>WheelyWise</span>
+    </div>
+  </div>
+
+    <div class="weather-center">
+        <!-- Current weather -->
+            <div class="weather-item">
+              ☀️ <span id="temperature">--</span>
+            </div>
+
+            <div class="weather-item">
+                <span id="weather">Loading...</span>
+            </div>
+
+            <div class="weather-item">
+                💨 <span id="wind_speed">--</span>
+            </div>
+
+    </div>
+    <div class="weather-right">
+        <!-- Forecast weather -->
+        <div class="forecast-card">
+            <div class="forecast-header">
+                <div id="forecast1-time">--</div>
+                <div class="forecast-label">Forecast</div>
+            </div>
+
+            <div class="forecast-main">
+                <div id="forecast1-temp">--</div>
+                <div id="forecast1-desc">--</div>
+            </div>
+
+        </div>
+
+        <div class="forecast-card">
+            <div class="forecast-header">
+                <div id="forecast2-time">--</div>
+                <div class="forecast-label">Forecast</div>
+            </div>
+
+            <div class="forecast-main">
+                <div id="forecast2-temp">--</div>
+                <div id="forecast2-desc">--</div>
+            </div>
+
+        </div>
+    </div>
+
+  </header>
+
+
+<!-- Map -->
+  <div id="map"></div>
+
+  <footer>WheelyWise</footer>
+  
+  <!-- Bottom Bar: Buttons and Search -->
+  <div class="bottom-bar">
+
+    <!-- Left side: Location and Stats -->
+    <div class="bottom-left">
+
+      <div class="location">
+        Dublin City Centre
+      </div>
+
+      <div class="stats">
+
+        <div class="stat">
+          <span class="dot green"></span>
+          <span id="stations-open">0 Stations Open</span>
+        </div>
+
+        <div class="stat">
+          <img src="/icons/bike.svg" width="16" alt="">
+          <span id="bikes-available">0 Bikes Available</span>
+        </div>
+        
+        <!-- Accessibility button -->
+        <div class="accessibility-wrapper">
+          <button id="accessibility-btn" class="icon-btn">⚙️ Assist</button>
+        
+          <!-- Dropdown menu for accessibility features -->
+          <div id="accessibility-menu" class="accessibility-menu">
+            <button id="toggle-contrast">🌓 High Contrast</button>
+            <button id="toggle-voice">🔊 Voice</button>
+          </div>
+        </div>
+        
+        <button onclick="openDrawer()">🗺️ Plan Route</button>
+        <button id="how-it-works-btn">❓ How WheelyWise Works</button>
+
+      </div>
+
+    </div>
+
+    <!-- Search -->
+    <div class="bottom-search">
+
+      <div class="search-container">
+
+        <input id="station-search" type="text" placeholder="Search stations...">
+
+        <div id="search-results" class="search-results"></div>
+
+      </div>
+
+    </div>
+
+  </div>
+  
+<!-- Welcome Modal -->
+
+  <div id="welcome-modal" class="modal">
+
+    <div class="welcome-content">
+
+      <div class="welcome-header">
+        🚲 Welcome to WheelyWise
+        <span id="close-welcome" class="close">&times;</span>
+      </div>
+      <div class="welcome-body">
+        <p>
+          WheelyWise makes it easy to find and rent bikes across Dublin City Centre.
+          Here's how it works:
+        </p>
+
+        <div class="welcome-step">
+          <div class="icon blue">📍</div>
+          <div>
+            <strong>Find a Station</strong>
+            <p>Browse the map to see bike stations near you.</p>
+          </div>
+        </div>
+
+        <div class="welcome-step">
+          <div class="icon green">🔍</div>
+          <div>
+            <strong>Check Availability</strong>
+            <p>Click any station marker to see real-time bikes and docks, or search for them.</p>
+          </div>
+        </div>
+
+        <div class="welcome-step">
+          <div class="icon purple">🚲</div>
+          <div>
+            <strong>Plan your Journey</strong>
+            <p>Choose your start and end points, and start your journey!</p>
+          </div>
+        </div>
+        
+        <div class="welcome-step">
+          <div class="icon yellow">⚙️</div>
+          <div>
+            <strong>Assist Features</strong>
+            <p>Use the Assist menu to enable high contrast mode or voice guidance for easier navigation.</p>
+          </div>
+        </div>
+
+        <div class="marker-box">
+
+          <strong>Marker Colours</strong>
+
+          <div class="marker-grid">
+            <div>🔵 Bikes and stands available</div>
+            <div>🔴 Stands available but no bikes available </div>
+            <div>🟢 Bikes available but no stands available</div>
+            <div>⚪ Station closed or offline</div>
+
+          </div>
+        </div>
+
+        <button id="start-btn" class="start-btn">Get Started</button>
+      </div>
+    </div>
+  </div>
+
+<!-- Route drawer -->
+<div id="drawer" class="drawer">
+  
+  <!-- HEADER (fixed, not scrollable) -->
+  <div class="drawer-header">
+    <h2 id="drawer-title">Route Planner</h2>
+    
+    <div id="route-actions" style="display: none;">
+      <button id="swap-btn">🔁 Swap</button>
+      <button id="reset-btn">❌ Clear Route</button>
+    </div>
+    
+    <span id="close-drawer" class="close">&times;</span>
+  </div>
+
+  <!-- SINGLE SCROLLABLE AREA -->
+  <div class="drawer-content">
+
+    <!-- ROUTE SECTION -->
+    <div id="route-section" class="drawer-section">
+      <h4>Route Planning</h4>
+      
+      <input id="start-input" placeholder="Enter your starting location">
+      <input id="end-input" placeholder="Enter your destination">
+      
+      <button id="route-btn">🚲 Get Route</button>
+    </div>
+
+    <!-- ROUTE OUTPUT -->
+    <div id="route-summary" class="route-status">
+      No route selected
+    </div>
+
+    <div id="route-container"></div>
+
+  </div>
+</div>
+
+<!-- Toast Notification -->  
+<div id="toast" class="toast hidden"></div>  
+
+<script src="/js/index.js"></script>
+<script>
+  fetch('/api/config')
+    .then(response => response.ok ? response.json() : Promise.reject(new Error('configuration unavailable')))
+    .then(config => {
+      if (!config.googleMapsApiKey) {
+        throw new Error('GOOGLE_MAPS_API_KEY is not configured');
+      }
+      const mapsScript = document.createElement('script');
+      mapsScript.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(config.googleMapsApiKey)}&libraries=places&callback=initMap&v=weekly`;
+      mapsScript.async = true;
+      mapsScript.defer = true;
+      document.body.appendChild(mapsScript);
+    })
+    .catch(error => {
+      console.error(error);
+      document.getElementById('map').innerHTML = '<div class="map-config-error">Set GOOGLE_MAPS_API_KEY to enable the interactive map.</div>';
+    });
+</script>
+  
+</body>
+
+</html>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" 
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.dublin.repository.CurrentWeatherRepository">
+
+    <resultMap id="CurrentWeatherResultMap" type="com.dublin.entity.CurrentWeather">
+        <id property="id" column="id"/>
+        <result property="dt" column="dt"/>
+        <result property="main" column="main"/>
+        <result property="description" column="description"/>
+        <result property="temp" column="temp"/>
+        <result property="windSpeed" column="wind_speed"/>
+        <result property="snapshotTime" column="snapshot_time"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.dublin.entity.CurrentWeather" 
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO current_weather (dt, main, description, temp, wind_speed, snapshot_time)
+        VALUES (#{dt}, #{main}, #{description}, #{temp}, #{windSpeed}, #{snapshotTime})
+    </insert>
+
+    <select id="findLatest" resultMap="CurrentWeatherResultMap">
+        SELECT id, dt, main, description, temp, wind_speed, snapshot_time
+        FROM current_weather
+        ORDER BY snapshot_time DESC
+        LIMIT 1
+    </select>
+
+    <delete id="deleteBySnapshotTimeBefore" parameterType="java.time.LocalDateTime">
+        DELETE FROM current_weather
+        WHERE snapshot_time &lt; #{dateTime}
+    </delete>
+
+</mapper>

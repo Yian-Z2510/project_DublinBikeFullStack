@@ -1,0 +1,1233 @@
+/* =========================================
+   WheelyWise Frontend Script
+
+   Handles:
+   - Google Maps integration
+   - Station data fetching
+   - Route planning logic
+   - Weather display
+   - Accessibility features (Text-to-Speech, high contrast mode)
+   - UI interactions (modals, drawer, search)
+
+   ========================================= */
+
+
+/* =========================================
+   GLOBAL STATE
+========================================= */
+
+// Global array for storing the station data from the API
+let stations = [];
+
+// Initialise route mapping variables
+let selectedStart = null;
+let selectedEnd = null;
+let currentStation = null;
+let activeRenderers = [];
+let clickMarkers = [];
+let routeMarkers = [];
+let startMarker = null;
+let endMarker = null;
+
+// reverse geocoding from Google Maps
+let geocoder;
+
+// Accessibility: Text-to-Speech
+let speechEnabled = false;
+
+/* =========================================
+   ACCESSIBILITY MODULE
+========================================= */
+
+// Text-to-Speech function
+function speak(text) {
+    if (!speechEnabled) return;
+    if (!("speechSynthesis" in window)) return;
+
+    const speech = new SpeechSynthesisUtterance(text);
+    speech.rate = 1;
+    speech.pitch = 1;
+    speech.lang = "en-IE";
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(speech);
+}
+
+// Text-to-Speech toast message (enabled / disabled)
+function showToast(message) {
+    const toast = document.getElementById("toast");
+    if (!toast) return;
+
+    toast.textContent = message;
+    toast.classList.remove("hidden");
+
+    setTimeout(() => {
+        toast.classList.add("hidden");
+    }, 2000);
+}
+
+// Load Google Charts once to speed up
+google.charts.load('current', { packages: ['corechart'] });
+
+// Adding markers for the bike stations
+/**
+ * Creates and adds map markers for all bike stations.
+ * For each station:
+ * - Assigns a color based on availability
+ * - Adds marker to Google Map
+ * - Attaches click listener to show info window
+ * - Displays station history chart using Google Charts
+ * @param {Array<Object>} stations - List of station objects from API
+ * @returns {void}
+ */
+function addMarkers(stations) {
+    console.log(stations);
+    // Create a marker for each station
+    for (const station of stations) {
+        // Assign a colour to each marker based on availability
+        const color = getStationColor(station);
+
+        const icon = {
+            url: `/icons/bike-${color}.svg`,
+            scaledSize: new google.maps.Size(28, 28)
+        };
+
+        // Create the Google Maps marker
+        const marker = new google.maps.Marker({
+            position: {
+                lat: Number(station.lat),
+                lng: Number(station.lng),
+            },
+            map: map,
+            title: station.name,
+            station_number: station.number,
+            icon: icon,
+        });
+
+        // Save marker reference for later searches
+        station.marker = marker;
+
+        // Show the info window upon click
+        marker.addListener("click", () => {
+            // Call routing function, display station information
+            currentStation = station;
+            
+            openDrawer(station);
+            
+            speak(`${station.name}. ${station.available_bikes} bikes available and ${station.available_stands} stands available.`);
+            
+            // Info window content (html)
+            const content = `
+                <div>
+                    <h3>${station.name}</h3>
+                    <p><strong>Available Bikes:</strong> ${station.available_bikes ?? "N/A"}</p>
+                    <p><strong style="color:#d4af37;">Free Stands:</strong> <span style="color:#d4af37;">${station.available_stands ?? "N/A"}</span></p>
+                    <div id="chart_div_${station.number}" style="width: 320px; height: 220px;"></div>
+                </div>
+            `;
+
+            // Set the content and open the window
+            infoWindow.setContent(content);
+            infoWindow.open(map, marker);
+
+            // Draw a time-series chart (last 5 records) once the library is ready
+            google.charts.setOnLoadCallback(async () => {
+                const chartData = new google.visualization.DataTable();
+                chartData.addColumn('datetime', 'Time');
+                chartData.addColumn('number', 'Available Bikes');
+                chartData.addColumn('number', 'Free Stands');
+
+                let historyRows = [];
+                try {
+                    const response = await fetch(`/api/bike/stations/${station.number}/history?limit=24`);
+                    if (!response.ok) {
+                        throw new Error(`history API failed: ${response.status}`);
+                    }
+                    const history = await response.json();
+                    historyRows = history
+                        .map((item) => {
+                            const ts = new Date(item.lastUpdate);
+                            if (!Number.isFinite(ts.getTime())) {
+                                return null;
+                            }
+                            return [
+                                ts,
+                                Number(item.availableBikes ?? 0),
+                                Number(item.availableBikeStands ?? 0),
+                            ];
+                        })
+                        .filter(Boolean);
+                } catch (err) {
+                    console.error("Error fetching station history:", err);
+                }
+
+                if (historyRows.length === 0) {
+                    historyRows = [[
+                        new Date(),
+                        Number(station.available_bikes ?? 0),
+                        Number(station.available_stands ?? 0),
+                    ]];
+                }
+
+                chartData.addRows(historyRows);
+
+                const options = {
+                    title: 'Station Time Series Overview',
+                    legend: { position: 'bottom' },
+                    curveType: 'function',
+                    series: {
+                        1: { color: '#d4af37' },
+                    },
+                    hAxis: {
+                        title: 'Time',
+                        format: 'HH:mm',
+                    },
+                    vAxis: {
+                        title: 'Count',
+                    },
+                    width: 320,
+                    height: 220,
+                };
+
+                // Draw the line chart
+                const chart = new google.visualization.LineChart(
+                    document.getElementById(`chart_div_${station.number}`)
+                );
+
+                chart.draw(chartData, options);
+            });
+        });
+    }
+}
+
+
+/**
+ * Fetches station data from backend API and:
+ * - Stores it globally
+ * - Creates map markers
+ * - Updates UI stats
+ * @returns {void}
+ */
+function getStations() {
+    fetch("/api/bike/stations")
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error(`station API failed: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then((data) => {
+            data = data.map(station => ({
+                number: station.number,
+                name: station.name,
+                lat: station.positionLat,
+                lng: station.positionLng,
+                available_bikes: Number(station.availableBikes ?? 0),
+                available_stands: Number(station.availableBikeStands ?? 0),
+                status: station.status,
+                last_update: station.lastUpdate
+            }));
+            console.log("fetch response", typeof data);
+
+            // Store stations globally and create map markers
+            stations = data;
+            addMarkers(stations);
+
+            // Calculate summary stats for the bottom bar
+            let totalBikes = data.reduce((sum, s) => sum + s.available_bikes, 0);
+
+            let openStations = data.filter(
+                s => s.available_bikes + s.available_stands > 0
+            ).length;
+
+            document.getElementById("bikes-available").innerText =
+                totalBikes + " Bikes Available";
+
+            document.getElementById("stations-open").innerText =
+                openStations + " Stations Open";
+        })
+        .catch((error) => {
+            console.error("Error fetching stations data:", error);
+            document.getElementById("stations-open").innerText = "Stations unavailable";
+            document.getElementById("bikes-available").innerText = "Bike data unavailable";
+        });
+}
+
+// Display current weather information
+/**
+ * Fetches and displays current weather data from backend API.
+ * Updates:
+ * - Temperature
+ * - Weather description
+ * - Wind speed
+ * @async
+ * @returns {Promise<void>}
+ */
+async function loadCurrentWeather() {
+    try{
+        const response = await fetch("/api/weather/current");
+        if (!response.ok) throw new Error(`current weather API failed: ${response.status}`);
+        const data = await response.json();
+
+        const temp = Math.round(data.temp);
+        const windspeed = Math.round(data.windSpeed);
+        document.getElementById("temperature").textContent = `${temp}°C`;
+        document.getElementById("weather").textContent = data.main || data.description;
+        document.getElementById("wind_speed").textContent = `${windspeed}m/s`;
+    } catch (error) {
+        console.error("Weather load failed:", error);
+        document.getElementById("weather").textContent = "Unavailable";
+    }
+}
+
+// Display forecast weather information
+/**
+ * Fetches and displays short-term weather forecast.
+ * Updates two forecast cards with:
+ * - Time
+ * - Temperature
+ * - Weather description
+ * @async
+ * @returns {Promise<void>}
+ */
+async function loadForecast() {
+    try {
+        const response = await fetch("/api/weather/forecast");
+        if (!response.ok) throw new Error(`forecast API failed: ${response.status}`);
+        const data = await response.json();
+        if (data.length < 2) throw new Error("forecast API returned fewer than two days");
+
+        data.slice(0, 2).forEach((forecast, index) => {
+            const card = index + 1;
+            const date = new Date(forecast.futureDt);
+            document.getElementById(`forecast${card}-time`).textContent =
+                date.toLocaleDateString('en-IE', { weekday: 'short' });
+            document.getElementById(`forecast${card}-temp`).textContent =
+                `${Math.round(forecast.temp12)}°C`;
+            document.getElementById(`forecast${card}-desc`).textContent =
+                forecast.main || forecast.description;
+        });
+
+    } catch (err) {
+        console.error("Forecast load failed:", err);
+        document.getElementById("forecast1-desc").textContent = "Unavailable";
+        document.getElementById("forecast2-desc").textContent = "Unavailable";
+    }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    loadCurrentWeather();
+    loadForecast();
+});
+
+// Accessibility features
+document.addEventListener("DOMContentLoaded", () => {
+
+    const menu = document.getElementById("accessibility-menu");
+    const btn = document.getElementById("accessibility-btn");
+
+    const contrastBtn = document.getElementById("toggle-contrast");
+    const voiceBtn = document.getElementById("toggle-voice");
+
+    if (!menu || !btn) return;
+
+    // Toggle menu
+    btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        menu.classList.toggle("show");
+    });
+
+    // Prevent clicks inside menu from closing it
+    menu.addEventListener("click", (e) => {
+        e.stopPropagation();
+    });
+
+    // High contrast toggle
+    if (contrastBtn) {
+        contrastBtn.addEventListener("click", () => {
+            const enabled = document.body.classList.toggle("high-contrast");
+
+            if (map) {
+                map.setOptions({
+                    styles: enabled ? darkMapStyle : []
+                });
+            }
+        });
+    }
+
+    // Voice toggle
+    if (voiceBtn) {
+        voiceBtn.addEventListener("click", () => {
+            speechEnabled = !speechEnabled;
+
+            const message = `Voice ${speechEnabled ? "enabled" : "disabled"}`;
+
+            voiceBtn.textContent = speechEnabled ? "🔊 Voice ON" : "🔇 Voice OFF";
+
+            showToast(message);
+
+            if (speechEnabled) {
+                speak(message);
+            }
+        });
+    }
+
+});
+
+// Initialize and add the map
+let darkMapStyle = [
+  { elementType: "geometry", stylers: [{ color: "#1d2c4d" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#8ec3b9" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1a3646" }] },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#0e1626" }]
+  }
+];
+
+
+// Initialise the map
+/**
+ * Initialises Google Map and core map functionality.
+ * Responsibilities:
+ * - Sets map center (Dublin) and bounds restriction
+ * - Enables click-to-select start/end points
+ * - Creates markers for user-selected points
+ * - Handles confirmation popup (start vs destination)
+ * - Loads station markers and autocomplete inputs
+ * @returns {void}
+ */
+    function initMap() {
+        const dublin = { lat: 53.35014, lng: -6.266155 };
+        
+        geocoder = new google.maps.Geocoder();
+        
+        const dublinBounds = {
+        north: 53.45,
+        south: 53.25,
+        west: -6.45,
+        east: -6.05
+        };
+
+        map = new google.maps.Map(document.getElementById("map"), {
+        zoom: 14,
+        center: dublin,
+        restriction: {
+            latLngBounds: dublinBounds,
+            strictBounds: true
+        },
+            styles: document.body.classList.contains("high-contrast") ? darkMapStyle : []   
+            
+    });
+        
+    let clickStage = "start";
+
+    map.addListener("click", (e) => {
+    infoWindow.close();
+
+    const clickedLocation = {
+        lat: e.latLng.lat(),
+        lng: e.latLng.lng()
+    };
+
+    const marker = new google.maps.Marker({
+        position: clickedLocation,
+        map: map
+    });
+
+    clickMarkers.push(marker);
+
+    // Create model
+    const isStart = clickStage === "start";
+
+    const content = `
+        <div class="map-popup">
+            <div class="popup-text">
+                ${isStart ? "Set as starting point?" : "Set as destination?"}
+            </div>
+            <div class="popup-actions">
+                <button id="confirm-btn" class="btn primary">Yes</button>
+                <button id="cancel-btn" class="btn secondary">No</button>
+            </div>
+        </div>
+    `;
+
+    infoWindow.setContent(content);
+    infoWindow.open(map, marker);
+
+    google.maps.event.addListenerOnce(infoWindow, 'domready', () => {
+        document.getElementById("confirm-btn").addEventListener("click", () => {
+            confirmPoint(
+                isStart ? "start" : "end",
+                clickedLocation.lat,
+                clickedLocation.lng
+            );
+        });
+        document.getElementById("cancel-btn").addEventListener("click", () => {
+            cancelPoint();
+        });
+});
+});
+
+// Confirm a selected point as start/destination        
+/**
+ * Confirms selected map point as start or destination.
+ * - Updates global state (selectedStart / selectedEnd)
+ * - Places labeled marker (A or D)
+ * - Reverse geocodes coordinates to address
+ * - Updates UI inputs and route summary
+ * - Triggers route calculation when destination is set
+ * @param {"start"|"end"} type - Type of point being set
+ * @param {number} lat - Latitude of selected point
+ * @param {number} lng - Longitude of selected point
+ * @returns {void}
+ */
+function confirmPoint(type, lat, lng) {
+    const location = { lat, lng };
+
+    if (type === "start") {
+        selectedStart = location;
+
+        // Delete original start marker
+        if (startMarker) startMarker.setMap(null);
+
+        // Create new start market
+        startMarker = new google.maps.Marker({
+            position: location,
+            map: map,
+            label: "A"
+        });
+
+        // Delete temporary marker
+        clickMarkers.forEach(m => m.setMap(null));
+        clickMarkers = [];
+
+        document.getElementById("start-input").value =
+            `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+        // geocoder
+        if (geocoder) {
+            geocoder.geocode({ location }, (results, status) => {
+                if (status === "OK" && results[0]) {
+                    document.getElementById("start-input").value =
+                        results[0].formatted_address;
+                }
+            });
+        }
+
+        document.getElementById("route-summary").innerText =
+            "Start selected — now choose destination";
+        speak("Start selected. Now choose your destination or type it into the destination bar");
+
+        clickStage = "end";
+        infoWindow.close();
+
+    } else {
+        selectedEnd = location;
+
+        // Delete original end marker
+        if (endMarker) endMarker.setMap(null);
+
+        // Create new end marker
+        endMarker = new google.maps.Marker({
+            position: location,
+            map: map,
+            label: "D"
+        });
+
+        // Delete temporary marker
+        clickMarkers.forEach(m => m.setMap(null));
+        clickMarkers = [];
+
+        document.getElementById("end-input").value =
+            `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+        if (geocoder) {
+            geocoder.geocode({ location }, (results, status) => {
+                if (status === "OK" && results[0]) {
+                    document.getElementById("end-input").value =
+                        results[0].formatted_address;
+                }
+            });
+        }
+
+        document.getElementById("route-summary").innerText =
+            "Route calculating...";
+
+        clickStage = "start";
+
+        infoWindow.close();
+
+        // Draw the route
+        calculateSmartRoute(selectedStart, selectedEnd);
+    }
+}
+
+// Cancel a selected point
+/**
+ * Cancels current map point selection.
+ * - Removes temporary markers
+ * - Closes info window popup 
+ * @returns {void}
+ */   
+function cancelPoint() {
+    clickMarkers.forEach(m => m.setMap(null));
+    clickMarkers = [];
+    infoWindow.close();
+}
+
+    // Single reusable information window
+    infoWindow = new google.maps.InfoWindow();
+    
+    // Route Mapping
+    directionsService = new google.maps.DirectionsService();
+
+    // Load station data
+    getStations();
+    
+    initAutocomplete();
+}
+
+/**
+ * Checks whether a given location is within Dublin bounds.
+ * @param {Object} location - {lat, lng}
+ * @returns {boolean} true if within allowed area
+ */
+function isWithinDublin(location) {
+    return (
+        location.lat >= 53.25 &&
+        location.lat <= 53.45 &&
+        location.lng >= -6.45 &&
+        location.lng <= -6.05
+    );
+}
+
+// Function to decide the marker colour
+/**
+ * Determines marker color based on station availability
+ * @param {Object} station
+ * @returns {string} color name (blue, red, green, grey)
+ */
+function getStationColor(station) {
+
+    if (station.available_bikes === 0 && station.available_stands === 0) {
+        return "grey";   // station closed / no data
+    }
+    if (station.available_bikes === 0) {
+        return "red";    // no bikes
+    }
+    if (station.available_stands === 0) {
+        return "green";  // station full
+    }
+    return "blue";       // bikes available
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    const welcomeModal = document.getElementById("welcome-modal");
+    const closeWelcome = document.getElementById("close-welcome");
+    const startBtn = document.getElementById("start-btn");
+    const howItWorksBtn = document.getElementById("how-it-works-btn");
+
+    // Show modal only first time
+    if (!localStorage.getItem("wheelyWelcomeSeen")) {
+        welcomeModal.classList.add("show");
+        localStorage.setItem("wheelyWelcomeSeen", "true");
+    }
+
+    function closeModal() {
+        welcomeModal.classList.remove("show");
+    }
+
+    // Open modal
+    function openModal() {
+        welcomeModal.classList.add("show");
+    }
+
+    closeWelcome.addEventListener("click", closeModal);
+    startBtn.addEventListener("click", closeModal);
+
+    if (howItWorksBtn) {
+        howItWorksBtn.addEventListener("click", openModal);
+    }
+});
+
+
+document.addEventListener("DOMContentLoaded", () => {
+
+    const searchInput = document.getElementById("station-search");
+    const resultsContainer = document.getElementById("search-results");
+
+    // Listen for user typing in the search box
+    searchInput.addEventListener("input", function () {
+
+        const search = this.value.toLowerCase();
+
+        // Clear previous results
+        resultsContainer.innerHTML = "";
+
+        // Hide the dropdown if search is empty
+        if (search.length === 0) {
+            resultsContainer.style.display = "none";
+            return;
+        }
+
+        // Find matching stations by their name or number (in the json)
+        const matches = stations.filter(station =>
+            station.name.toLowerCase().includes(search) ||
+            station.number.toString().includes(search)
+        );
+
+        // Show first 8 matches in the dropdown menu
+        matches.slice(0, 8).forEach(station => {
+
+            const item = document.createElement("div");
+            item.className = "search-item";
+
+            item.innerHTML = `
+                <strong>${station.name}</strong><br>
+                🚲 ${station.available_bikes} bikes available
+            `;
+
+            // Zoom to the matching marker upon click
+            item.addEventListener("click", () => {
+
+                map.panTo({
+                    lat: Number(station.lat),
+                    lng: Number(station.lng)
+                });
+
+                map.setZoom(16);
+
+                // Trigger marker click to open info window
+                google.maps.event.trigger(station.marker, "click");
+
+                resultsContainer.style.display = "none";
+                searchInput.value = station.name;
+            });
+
+            resultsContainer.appendChild(item);
+        });
+
+        // Show dropdown menu if matches exist
+        resultsContainer.style.display = matches.length ? "block" : "none";
+    });
+
+    // Close dropdown when clicking elsewhere
+    document.addEventListener("click", (e) => {
+        if (!e.target.closest(".search-container")) {
+            resultsContainer.style.display = "none";
+        }
+    });
+
+});
+
+// Routing Slide Drawer
+/**
+ * Opens or toggles the route planner drawer.
+ * If a station is provided, displays its name in the drawer.
+ * @param {Object|null} station - Selected station (optional)
+ */
+function openDrawer(station = null) {
+    const drawer = document.getElementById("drawer");
+    if (!drawer) return;
+
+    // Toggle instead of always open
+    const isOpen = drawer.classList.contains("open");
+
+    if (isOpen) {
+        drawer.classList.remove("open");
+        return;
+    }
+
+    // Otherwise open it
+    if (station) {
+        currentStation = station;
+        document.getElementById("drawer-title").innerText = station.name;
+
+    } else {
+        document.getElementById("drawer-title").innerText = "Route Planner";
+        speak("Plan your route. Select a starting point on the map or type it into the starting location bar");
+    }
+
+    drawer.classList.add("open");
+}
+
+function closeDrawer()  {
+    document.getElementById("drawer").classList.remove("open");
+}
+
+// Routing Function
+/**
+ * Calculates an optimal bike route using:
+ * - Walking → Start Station
+ * - Cycling → End Station
+ * - Walking → Destination
+ * @param {Object} start - {lat, lng} starting coordinates
+ * @param {Object} end - {lat, lng} destination coordinates
+ * @returns {void}
+ */
+
+function calculateSmartRoute(start, end) {
+    infoWindow.close();
+    if (stations.length === 0) {
+        alert("Stations still loading...");
+        return;
+    }
+    
+    if (!isWithinDublin(start) || !isWithinDublin(end)) {
+    alert("Route must be within Dublin");
+    return;
+}
+    
+    clearRoute();
+    document.getElementById("route-actions").style.display = "none";
+
+    const startStation = getNearestStartStation(start);
+    const endStation = getNearestEndStation(end);
+    
+    if (!startStation || !endStation) {
+        alert("No nearby stations available");
+        return;
+    }
+
+    const segments = [
+        {
+            origin: start,
+            destination: {
+                lat: Number(startStation.lat),
+                lng: Number(startStation.lng)
+            },
+            mode: google.maps.TravelMode.WALKING,
+            color: "#FFFF00", // yellow
+            label: `A to B: 🚶 Walk to ${startStation.name}`
+        },
+        {
+            origin: {
+                lat: Number(startStation.lat),
+                lng: Number(startStation.lng)
+            },
+            destination: {
+                lat: Number(endStation.lat),
+                lng: Number(endStation.lng)
+            },
+            mode: google.maps.TravelMode.BICYCLING,
+            color: "#FF0000", // red
+            label: `B to C: 🚲 Cycle to ${endStation.name}`
+        },
+        {
+            origin: {
+                lat: Number(endStation.lat),
+                lng: Number(endStation.lng)
+            },
+            destination: end,
+            mode: google.maps.TravelMode.WALKING,
+            color: "#FFFF00",
+            label: "C to D: 🚶 Walk to your destination"
+        }
+    ];
+
+    drawSegments(segments);
+}
+// Providing the segmented journey visual
+/**
+ * Draws multi-segment route on the map.
+ * - Renders walking and cycling segments
+ * - Places A → B → C → D markers
+ * - Calculates total distance and duration
+ * - Displays step-by-step instructions
+ * - Adjusts map bounds to fit full route
+ * @param {Array<Object>} segments - Route segments definition
+ * @returns {void}
+ */
+
+function drawSegments(segments) {
+    let totalDistance = 0;
+    let totalDuration = 0;
+    let completed = 0;
+
+    let routePoints = [];
+    let segmentResults = new Array(segments.length);
+
+    // Clear old route markers first
+    routeMarkers.forEach(m => m.setMap(null));
+    routeMarkers = [];
+
+    // Create A → B → C → D markers ONCE
+    const points = [
+        segments[0].origin,              // A
+        segments[0].destination,         // B
+        segments[1].destination,         // C
+        segments[2].destination          // D
+    ];
+
+    const labels = ["A", "B", "C", "D"];
+
+    points.forEach((point, i) => {
+        const marker = new google.maps.Marker({
+            position: point,
+            map: map,
+            label: labels[i]
+        });
+        routeMarkers.push(marker);
+    });
+
+    // Loop through segments (no markers inside here)
+    segments.forEach((segment, index) => {
+        const renderer = new google.maps.DirectionsRenderer({
+            suppressMarkers: true,
+            preserveViewport: true,
+            polylineOptions: {
+                strokeColor: segment.color,
+                strokeWeight: 5,
+                strokeOpacity: 0.9
+            }
+        });
+
+        renderer.setMap(map);
+        activeRenderers.push(renderer);
+
+        directionsService.route({
+            origin: segment.origin,
+            destination: segment.destination,
+            travelMode: segment.mode
+        }, (result, status) => {
+            if (status === "OK") {
+                renderer.setDirections(result);
+
+                const leg = result.routes[0].legs[0];
+
+                totalDistance += leg.distance.value;
+                totalDuration += leg.duration.value;
+
+                // Collect full route path for proper zoom
+                result.routes[0].overview_path.forEach(point => {
+                    routePoints.push(point);
+                });
+
+                // Build segment HTML
+                let segmentHTML = `
+                    <div class="segment">
+                        <div class="segment-header" onclick="toggleSegment(${index})">
+                            ▶ ${segment.label}
+                        </div>
+                        <div id="segment-${index}" class="segment-steps hidden">
+                `;
+
+                leg.steps.forEach((step, i) => {
+                    segmentHTML += `
+                        <div class="step">
+                            <strong>${i + 1}.</strong> ${step.instructions}<br>
+                            <span class="step-distance">
+                                ${step.distance.text}
+                            </span>
+                        </div>
+                    `;
+                });
+
+                segmentHTML += `
+                        </div>
+                    </div>
+                `;
+
+                // Store in correct order
+                segmentResults[index] = segmentHTML;
+
+                completed++;
+
+                // Only render AFTER all segments finish
+                if (completed === segments.length) {
+                    const km = (totalDistance / 1000).toFixed(2);
+                    const mins = Math.round(totalDuration / 60);
+                    
+                    speak(`Route calculated. Distance ${km} kilometers. Duration ${mins} minutes.`);
+
+                    const orderedHTML = segmentResults.join("");
+
+                    document.getElementById("route-summary").innerHTML = `
+                        <div class="route-summary">
+                             🚲 ${km} km • ⏱️ ${mins} mins
+                        </div>
+
+                        <div class="route-overview">
+                            ${orderedHTML}
+                        </div>
+                    `;
+
+                    // Show buttons
+                    const actions = document.getElementById("route-actions");
+                    if (actions) actions.style.display = "flex";
+
+                    // Fit FULL route bounds
+                    const bounds = new google.maps.LatLngBounds();
+                    routePoints.forEach(point => bounds.extend(point));
+                    const drawer = document.getElementById("drawer"); // View full route with drawer open/closed
+                    const drawerWidth = drawer.classList.contains("open") ? drawer.offsetWidth : 0;
+
+                    map.fitBounds(bounds, {
+                        top: 80,
+                        bottom: 80,
+                        left: drawerWidth + 40,
+                        right: 80
+                    });
+                }
+
+            } else {
+                console.error("Segment failed:", status);
+            }
+        });
+    });
+}
+// Display route overview & details (without overcrowding page)
+/**
+ * Toggles visibility of route segment steps.
+ * Expands/collapses detailed instructions for a segment.
+ * @param {number} index - Segment index
+ * @returns {void}
+ */
+function toggleSegment(index) {
+    const el = document.getElementById(`segment-${index}`);
+    const header = el.previousElementSibling;
+
+    if (el.classList.contains("hidden")) {
+        el.classList.remove("hidden");
+        header.innerText = "▼ " + header.innerText.replace("▶ ", "").replace("▼ ", "");
+    } else {
+        el.classList.add("hidden");
+        header.innerText = "▶ " + header.innerText.replace("▶ ", "").replace("▼ ", "");
+    }
+}
+
+// Clear route after use
+/**
+ * Clears all route-related elements from the map and UI.
+ * - Removes route lines and markers
+ * - Resets route summary display
+ * - Clears start/end markers
+ * @returns {void}
+ */
+function clearRoute() {
+    activeRenderers.forEach(renderer => {
+        renderer.setMap(null); // removes from map
+    });
+
+    activeRenderers = []; // reset array
+    
+    //clear click markers
+    clickMarkers.forEach(m => m.setMap(null));
+    clickMarkers = [];
+    
+    // clear route markers
+    routeMarkers.forEach(marker => marker.setMap(null));
+    routeMarkers = [];
+    
+    document.getElementById("route-summary").innerText = "No route selected";
+
+    // Clear start/end markers
+    if (startMarker) {
+        startMarker.setMap(null);
+        startMarker = null;
+    }
+
+    if (endMarker) {
+        endMarker.setMap(null);
+        endMarker = null;
+    }
+
+    // Clear status
+    // selectedStart = null;
+    // selectedEnd = null;
+
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+
+    document.getElementById("close-drawer").addEventListener("click", closeDrawer);
+
+    
+    document.getElementById("route-btn").addEventListener("click", () => {
+        if (!selectedStart || !selectedEnd) {
+            alert("Please enter both your start point and destination");
+            return;
+        }
+        calculateSmartRoute(selectedStart, selectedEnd);
+    });
+    document.getElementById("swap-btn").addEventListener("click", swapRoute);
+    document.getElementById("reset-btn").addEventListener("click", resetRoute);
+
+});
+
+// Find the nearest station with a bike
+/**
+ * Finds the nearest station with available bikes.
+ * @param {Object} point - {lat, lng}
+ * @returns {Object|null} closest station or null if none found
+ */
+function getNearestStartStation(point) {
+    let closest = null;
+    let minDistance = Infinity;
+
+    stations.forEach(station => {
+        if (station.available_bikes <= 0) return; // skip ones without bikes
+
+        const dist = Math.hypot(
+            point.lat - Number(station.lat),
+            point.lng - Number(station.lng)
+        );
+
+        if (dist < minDistance) {
+            minDistance = dist;
+            closest = station;
+        }
+    });
+
+    return closest;
+}
+
+// Find the nearest station with a stand
+/**
+ * Finds the nearest station with available stands.
+ * @param {Object} point - {lat, lng}
+ * @returns {Object|null} closest station or null if none found
+ */
+function getNearestEndStation(point) {
+    let closest = null;
+    let minDistance = Infinity;
+
+    stations.forEach(station => {
+        if (station.available_stands <= 0) return; // skip ones with nowhere to park
+
+        const dist = Math.hypot(
+            point.lat - Number(station.lat),
+            point.lng - Number(station.lng)
+        );
+
+        if (dist < minDistance) {
+            minDistance = dist;
+            closest = station;
+        }
+    });
+
+    return closest;
+}
+
+// Automatically finish what the user is typing for route inputs
+/**
+ * Initialises Google Places autocomplete for route inputs.
+ * - Restricts results to Ireland
+ * - Updates selectedStart and selectedEnd on selection
+ * @returns {void}
+ */
+function initAutocomplete() {
+    const startInput = document.getElementById("start-input");
+    const endInput = document.getElementById("end-input");
+
+    if (!startInput || !endInput) {
+        console.error("Inputs not found");
+        return;
+    }
+
+    const startAutocomplete = new google.maps.places.Autocomplete(startInput, {
+        componentRestrictions: { country: "ie" }
+    });
+
+    const endAutocomplete = new google.maps.places.Autocomplete(endInput, {
+        componentRestrictions: { country: "ie" }
+    });
+
+    startAutocomplete.addListener("place_changed", () => {
+        infoWindow.close();
+        const place = startAutocomplete.getPlace();
+
+        if (!place.geometry) {
+            alert("Please select a valid location");
+            return;
+        }
+
+        selectedStart = {
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng()
+        };
+
+        console.log("✅ Start set:", selectedStart);
+        
+    });
+
+    endAutocomplete.addListener("place_changed", () => {
+        const place = endAutocomplete.getPlace();
+
+        if (!place.geometry) {
+            alert("Please select a valid location");
+            return;
+        }
+
+        selectedEnd = {
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng()
+        };
+
+        console.log("🏁 End set:", selectedEnd);
+
+    });
+}
+
+// If a user wants to swap their start and end points
+/**
+ * Swaps start and destination locations. 
+ * - Exchanges coordinates and input values
+ * - Recalculates route
+ * @returns {void}
+ */
+function swapRoute() {
+    if (!selectedStart || !selectedEnd) return;
+    
+    // Swap the locations
+    [selectedStart, selectedEnd] = [selectedEnd, selectedStart];
+    
+    // Swap the text for the inputs
+    const startInput = document.getElementById("start-input");
+    const endInput = document.getElementById("end-input");
+    
+    [startInput.value, endInput.value] = [endInput.value, startInput.value];
+    
+    clearRoute();
+    calculateSmartRoute(selectedStart, selectedEnd);
+}
+
+// Reset the screen
+/**
+ * Resets route planning state and UI.
+ * - Clears map route
+ * - Resets selected start/end points
+ * - Clears input fields
+ * - Hides route action buttons
+ * @returns {void}
+ */
+function resetRoute() {
+    // Clear the route line
+    clearRoute();
+    
+    // Reset values
+    selectedStart = null;
+    selectedEnd = null;
+    
+    // Clear the inputs in the drawer
+    document.getElementById("start-input").value = "";
+    document.getElementById("end-input").value = "";
+    document.getElementById("route-summary").innerText = "No route selected";
+    
+    // hide buttons
+    const actions = document.getElementById("route-actions");
+    if (actions) actions.style.display = "none";
+    
+}
+
+// Global map + info window variables
+var map = null;
+var infoWindow = null;
+
+// Global Route Mapping variables
+var directionsService = null;
+
+// Required for Google Maps callback
+window.initMap = initMap;

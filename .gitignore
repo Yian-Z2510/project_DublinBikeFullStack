@@ -1,0 +1,36 @@
+# Maven build output
+target/
+*.class
+*.jar
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+application-local.yml
+application-local.yaml
+application-local.properties
+secrets.yml
+secrets.yaml
+secrets.properties
+*.pem
+*.key
+*.p12
+*.pfx
+
+# IDE and OS metadata
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+.DS_Store
+Thumbs.db
+
+# Runtime output
+*.log
+*.pid
+*.pid.lock
+hs_err_pid*
+.attach_pid*

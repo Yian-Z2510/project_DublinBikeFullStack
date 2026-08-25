@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" 
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.dublin.repository.BikeStationStatusRepository">
+
+    <resultMap id="BikeStationStatusResultMap" type="com.dublin.entity.BikeStationStatus">
+        <id property="id" column="id"/>
+        <result property="number" column="number"/>
+        <result property="lastUpdate" column="last_update"/>
+        <result property="availableBikes" column="available_bikes"/>
+        <result property="availableBikeStands" column="available_bike_stands"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.dublin.entity.BikeStationStatus" 
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bike_station_status (number, last_update, available_bikes, available_bike_stands, status)
+        VALUES (#{number}, #{lastUpdate}, #{availableBikes}, #{availableBikeStands}, #{status})
+        ON DUPLICATE KEY UPDATE
+            available_bikes = VALUES(available_bikes),
+            available_bike_stands = VALUES(available_bike_stands),
+            status = VALUES(status)
+    </insert>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO bike_station_status (number, last_update, available_bikes, available_bike_stands, status)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.number}, #{item.lastUpdate}, #{item.availableBikes}, 
+             #{item.availableBikeStands}, #{item.status})
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            available_bikes = VALUES(available_bikes),
+            available_bike_stands = VALUES(available_bike_stands),
+            status = VALUES(status)
+    </insert>
+
+    <select id="findByNumber" parameterType="int" resultMap="BikeStationStatusResultMap">
+        SELECT id, number, last_update, available_bikes, available_bike_stands, status
+        FROM bike_station_status
+        WHERE number = #{number}
+        ORDER BY last_update DESC, id DESC
+    </select>
+
+    <select id="findLatestByNumber" parameterType="int" resultMap="BikeStationStatusResultMap">
+        SELECT id, number, last_update, available_bikes, available_bike_stands, status
+        FROM bike_station_status
+        WHERE number = #{number}
+        ORDER BY last_update DESC, id DESC
+        LIMIT 1
+    </select>
+
+    <select id="findRecentByNumber" resultMap="BikeStationStatusResultMap">
+        SELECT id, number, last_update, available_bikes, available_bike_stands, status
+        FROM bike_station_status
+        WHERE number = #{number}
+        ORDER BY last_update DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
+    <delete id="deleteByLastUpdateBefore" parameterType="java.time.LocalDateTime">
+        DELETE FROM bike_station_status
+        WHERE last_update &lt; #{dateTime}
+    </delete>
+
+</mapper>

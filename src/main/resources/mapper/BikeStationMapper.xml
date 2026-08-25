@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" 
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.dublin.repository.BikeStationRepository">
+
+    <resultMap id="BikeStationResultMap" type="com.dublin.entity.BikeStation">
+        <id property="id" column="id"/>
+        <result property="number" column="number"/>
+        <result property="address" column="address"/>
+        <result property="banking" column="banking"/>
+        <result property="bikeStands" column="bike_stands"/>
+        <result property="name" column="name"/>
+        <result property="positionLat" column="position_lat"/>
+        <result property="positionLng" column="position_lng"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.dublin.entity.BikeStation" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bike_station (number, address, banking, bike_stands, name, position_lat, position_lng)
+        VALUES (#{number}, #{address}, #{banking}, #{bikeStands}, #{name}, #{positionLat}, #{positionLng})
+    </insert>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO bike_station (number, address, banking, bike_stands, name, position_lat, position_lng)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.number}, #{item.address}, #{item.banking}, #{item.bikeStands}, 
+             #{item.name}, #{item.positionLat}, #{item.positionLng})
+        </foreach>
+    </insert>
+
+    <select id="findById" parameterType="int" resultMap="BikeStationResultMap">
+        SELECT id, number, address, banking, bike_stands, name, position_lat, position_lng
+        FROM bike_station
+        WHERE number = #{number}
+    </select>
+
+    <select id="findAll" resultMap="BikeStationResultMap">
+        SELECT id, number, address, banking, bike_stands, name, position_lat, position_lng
+        FROM bike_station
+    </select>
+
+</mapper>
