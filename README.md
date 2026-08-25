@@ -1,59 +1,55 @@
-# WheelyWise — Dublin Bike Availability & Weather
+# WheelyWise — Dublin Bike Journey Companion
 
-WheelyWise is a full-stack Dublin mobility demonstration that combines live bike-station availability, station history, weather, forecasts, route planning, and an interactive Google Map. The browser frontend is served by the same Spring Boot application that provides the REST API.
+WheelyWise is a full-stack web application that helps Dublin commuters quickly decide whether a bike-share trip is practical right now. It brings live Dublin Bikes station availability, free-stand visibility, route planning, and weather conditions into a single map-based experience so users do not need to jump between multiple tools before starting a journey.
 
-## Engineering overview
+![WheelyWise homepage](./assets/wheelywise-homepage.png)
 
-- Java 8 and Spring Boot 2.7 REST backend
-- MyBatis persistence backed by MySQL 8
-- Scheduled JCDecaux station ingestion every five minutes
-- Scheduled OpenWeather current-weather and forecast ingestion every hour
-- Idempotent station snapshots with seven-day retention and historical availability queries
-- Static HTML, CSS, and JavaScript frontend with Google Maps integration
-- Environment-based database and API configuration
+## Overview
 
-The backend follows a small layered structure: controllers expose `/api` endpoints, services own application operations and transaction boundaries, MyBatis repositories map domain records to MySQL, external API clients translate provider responses, and scheduled tasks coordinate ingestion and cleanup. Persisted data remains available when an external provider is temporarily unavailable.
+A bike-share trip depends on more than just finding the nearest station. Users need to know whether there is a bike available near their starting point, whether there is a free stand near their destination, how to get there, and whether the current weather makes cycling a sensible choice.
 
-## Local setup
+WheelyWise combines those decisions into one simple interface powered by a Java Spring Boot backend and a browser-based map UI.
 
-Requirements: Java 8+, Maven, MySQL 8, and API keys for JCDecaux, OpenWeather, and Google Maps.
+## Tech Stack
 
-### 1. Initialize MySQL
+- **Backend:** Java 8, Spring Boot 2.7
+- **Persistence:** MyBatis, MySQL 8
+- **Frontend:** HTML, CSS, JavaScript
+- **External APIs:** JCDecaux, OpenWeather, Google Maps Platform
+- **Build Tool:** Maven
 
-> **Warning:** `init-database.sql` drops and recreates the application tables. Running it again deletes existing station and weather history. Back up any data you need first.
+## Key Features
 
-```bash
-mysql -u root -p < init-database.sql
-```
+- **Live station availability**  
+  View current Dublin Bikes station status, including available bikes and free stands.
 
-### 2. Configure the environment
+- **Interactive map experience**  
+  Explore station locations directly on a Google Map with visual station markers.
 
-Use `.env.example` as the variable list. Export the values in the shell that starts Maven:
+- **Route planning**  
+  Plan a journey between two points and see how bike-share can fit into the route.
 
-```bash
-export DB_URL='jdbc:mysql://localhost:3306/dublin_service?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true'
-export DB_USERNAME='root'
-export DB_PASSWORD='your-local-password'
-export JCDECAUX_API_KEY='your-jcdecaux-key'
-export OPENWEATHER_API_KEY='your-openweather-key'
-export GOOGLE_MAPS_API_KEY='your-browser-key'
-```
+- **Station search**  
+  Quickly find stations by name or location.
 
-`DB_URL` and `DB_USERNAME` may be omitted when the defaults in `application.yml` match the local database. Keep real credentials out of source control.
+- **Weather-aware journey decisions**  
+  Check current weather and short-term forecast while deciding whether to cycle.
 
-For Google Maps, enable the Maps JavaScript API and Places API for the browser key. Restrict the key to HTTP referrers and allow the local origins used for development, such as `http://localhost:8080/*` and, if needed, `http://127.0.0.1:8080/*`.
+- **Simple trip-assistance UI**  
+  A user-friendly interface designed to support quick journey decisions in one place.
 
-### 3. Build and run
+## Engineering Highlights
 
-```bash
-mvn test
-mvn package
-mvn spring-boot:run
-```
+- **Java Spring Boot REST backend** serving both APIs and the browser frontend
+- **MyBatis + MySQL persistence** for station and weather data
+- **Scheduled data ingestion**
+  - JCDecaux station data refreshed every 5 minutes
+  - OpenWeather current weather and forecast refreshed every hour
+- **Database-backed idempotent snapshot ingestion** using uniqueness constraints and upsert logic to prevent duplicate station snapshots
+- **Failure-isolated external refresh jobs** so one provider failure does not interrupt other scheduled refreshes
+- **Environment-based configuration** for database and API credentials
 
-Open [http://localhost:8080/](http://localhost:8080/). Swagger UI is available at [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html).
-
-## Main API endpoints
+## Main API Endpoints
 
 - `GET /api/bike/stations`
 - `GET /api/bike/stations/{number}`
@@ -62,14 +58,30 @@ Open [http://localhost:8080/](http://localhost:8080/). Swagger UI is available a
 - `GET /api/weather/forecast`
 - `GET /api/config`
 
-## Project Origin & Attribution
+## Run Locally
 
-This application originated from a university group project. The WheelyWise frontend was created as part of that group project, and the initial Java backend implementation originated from another contributor's work in the repository history.
+1. Initialize MySQL:
 
-The current repository represents subsequent work to integrate the frontend and Java backend into one Spring Boot application, align the browser with the Java APIs, add station-history support, externalize configuration, audit credentials and generated files, improve ingestion integrity and failure isolation, add focused tests, and prepare the project for portfolio presentation.
+```bash
+mysql -u root -p < init-database.sql
+```
 
-These origins are stated explicitly so the repository does not imply sole authorship of components originally contributed by others.
+2. Configure the required database and API credentials using `.env.example`.
 
-## Scope
+3. For Google Maps local development, allow:
 
-Prediction and the former demonstration account/payment UI were intentionally removed. Authentication, deployment, and production-scale infrastructure are outside the current project scope.
+```text
+http://localhost:8080/*
+```
+
+4. Run the application:
+
+```bash
+mvn spring-boot:run
+```
+
+Then open:
+
+```text
+http://localhost:8080/
+```
